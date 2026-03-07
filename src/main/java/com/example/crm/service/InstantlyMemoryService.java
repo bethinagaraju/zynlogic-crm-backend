@@ -5,11 +5,12 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.Collections;
+import java.time.Instant;
 import java.util.Iterator;
 import java.util.List;
 
+import com.example.crm.model.EmailLead;
+import com.example.crm.repository.EmailLeadRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -23,30 +24,26 @@ public class InstantlyMemoryService {
     private final String baseUrl;
     private final HttpClient httpClient;
     private final ObjectMapper mapper = new ObjectMapper();
-
-    private final List<JsonNode> memory = Collections.synchronizedList(new ArrayList<>());
+    private final EmailLeadRepository repository;
 
     public InstantlyMemoryService(@Value("${instantly.api.key}") String apiKey,
-            @Value("${instantly.api.base-url:https://api.instantly.ai}") String baseUrl) {
+            @Value("${instantly.api.base-url:https://api.instantly.ai}") String baseUrl,
+            EmailLeadRepository repository) {
         this.apiKey = apiKey;
         this.baseUrl = baseUrl;
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+        this.repository = repository;
     }
 
-    public List<JsonNode> getMemorySnapshot() {
-        synchronized (memory) {
-            return new ArrayList<>(memory);
-        }
+    public List<EmailLead> getAllLeads() {
+        return repository.findAll();
     }
 
     public int syncAllEmails() throws Exception {
-        memory.clear();
-
         String nextToken = null;
-        int page = 0;
+        int added = 0;
         do {
-            page++;
-            URI uri = URI.create(baseUrl + "/api/v2/emails?limit=100&email_type=received&category=others"
+            URI uri = URI.create(baseUrl + "/api/v2/emails?limit=100&email_type=received"
                     + (nextToken != null ? "&starting_after=" + nextToken : ""));
 
             HttpRequest req = HttpRequest.newBuilder(uri)
@@ -74,7 +71,6 @@ public class InstantlyMemoryService {
                 } else if (root.has("emails")) {
                     itemsNode = root.get("emails");
                 } else {
-                    // search for any array field
                     Iterator<JsonNode> it = root.elements();
                     while (it.hasNext()) {
                         JsonNode n = it.next();
@@ -88,7 +84,47 @@ public class InstantlyMemoryService {
 
             if (itemsNode != null && itemsNode.isArray()) {
                 for (JsonNode item : itemsNode) {
-                    memory.add(item);
+                    String id = item.path("id").asText(null);
+                    if (id == null) continue;
+
+                    EmailLead lead = new EmailLead();
+                    lead.setId(id);
+
+                    String tsCreated = item.path("timestamp_created").asText(null);
+                    if (tsCreated != null && !tsCreated.isEmpty()) {
+                        try { lead.setTimestampCreated(Instant.parse(tsCreated)); } catch (Exception ex) { }
+                    }
+                    String tsEmail = item.path("timestamp_email").asText(null);
+                    if (tsEmail != null && !tsEmail.isEmpty()) {
+                        try { lead.setTimestampEmail(Instant.parse(tsEmail)); } catch (Exception ex) { }
+                    }
+
+                    lead.setOrganizationId(item.path("organization_id").asText(null));
+                    lead.setEaccount(item.path("eaccount").asText(null));
+                    lead.setFromAddressEmail(item.path("from_address_email").asText(null));
+                    lead.setCampaignId(item.path("campaign_id").asText(null));
+                    lead.setLead(item.path("lead").asText(null));
+
+                    if (item.has("ue_type") && item.get("ue_type").canConvertToInt()) {
+                        lead.setUeType(item.path("ue_type").asInt());
+                    }
+                    lead.setStep(item.path("step").asText(null));
+                    if (item.has("is_unread") && item.get("is_unread").canConvertToInt()) {
+                        lead.setIsUnread(item.path("is_unread").asInt());
+                    }
+                    if (item.has("ai_interest_value") && item.get("ai_interest_value").canConvertToInt()) {
+                        lead.setAiInterestValue(item.path("ai_interest_value").asInt());
+                    }
+                    if (item.has("is_focused") && item.get("is_focused").canConvertToInt()) {
+                        lead.setIsFocused(item.path("is_focused").asInt());
+                    }
+                    if (item.has("i_status") && item.get("i_status").canConvertToInt()) {
+                        lead.setIStatus(item.path("i_status").asInt());
+                    }
+                    lead.setThreadId(item.path("thread_id").asText(null));
+
+                    repository.save(lead);
+                    added++;
                 }
             }
 
@@ -106,13 +142,10 @@ public class InstantlyMemoryService {
 
             nextToken = (token == null || token.isEmpty()) ? null : token;
 
-            // stop if no token or no items returned
-            if (nextToken == null) {
-                break;
-            }
+            if (nextToken == null) break;
 
         } while (true);
 
-        return memory.size();
+        return added;
     }
 }

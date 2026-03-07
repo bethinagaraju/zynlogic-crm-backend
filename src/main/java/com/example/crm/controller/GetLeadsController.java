@@ -32,7 +32,7 @@ public class GetLeadsController {
 
     @GetMapping("/get-leads")
     public ResponseEntity<String> getLeads() throws Exception {
-        String json = mapper.writeValueAsString(memoryService.getMemorySnapshot());
+        String json = mapper.writeValueAsString(memoryService.getAllLeads());
         return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(json);
     }
 
