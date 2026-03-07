@@ -123,8 +123,10 @@ public class InstantlyMemoryService {
                     }
                     lead.setThreadId(item.path("thread_id").asText(null));
 
-                    repository.save(lead);
-                    added++;
+                    if (!repository.existsById(id)) {
+                        repository.save(lead);
+                        added++;
+                    }
                 }
             }
 
