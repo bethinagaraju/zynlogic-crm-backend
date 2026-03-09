@@ -31,6 +31,7 @@ public class EmailLead {
     @Column(name = "campaign_id")
     private String campaignId;
 
+    @Column(name = "lead", unique = true)
     private String lead;
 
     @Column(name = "ue_type")

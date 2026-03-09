@@ -103,7 +103,8 @@ public class InstantlyMemoryService {
                     lead.setEaccount(item.path("eaccount").asText(null));
                     lead.setFromAddressEmail(item.path("from_address_email").asText(null));
                     lead.setCampaignId(item.path("campaign_id").asText(null));
-                    lead.setLead(item.path("lead").asText(null));
+                    String leadStr = item.path("lead").asText(null);
+                    lead.setLead(leadStr);
 
                     if (item.has("ue_type") && item.get("ue_type").canConvertToInt()) {
                         lead.setUeType(item.path("ue_type").asInt());
@@ -123,7 +124,10 @@ public class InstantlyMemoryService {
                     }
                     lead.setThreadId(item.path("thread_id").asText(null));
 
-                    if (!repository.existsById(id)) {
+                    boolean existsById = repository.existsById(id);
+                    boolean existsByLead = (leadStr != null && !leadStr.isEmpty()) && repository.existsByLead(leadStr);
+
+                    if (!existsById && !existsByLead) {
                         repository.save(lead);
                         added++;
                     }
