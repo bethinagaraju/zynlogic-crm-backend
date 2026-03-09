@@ -6,6 +6,9 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.OneToOne;
+import com.fasterxml.jackson.annotation.JsonManagedReference;
 
 @Entity
 @Table(name = "email_lead")
@@ -53,6 +56,10 @@ public class EmailLead {
 
     @Column(name = "thread_id")
     private String threadId;
+
+    @OneToOne(mappedBy = "emailLead", cascade = CascadeType.ALL, orphanRemoval = true)
+    @JsonManagedReference
+    private LeadDetails details;
 
     public EmailLead() {
     }
@@ -102,4 +109,7 @@ public class EmailLead {
 
     public String getThreadId() { return threadId; }
     public void setThreadId(String threadId) { this.threadId = threadId; }
+
+    public LeadDetails getDetails() { return details; }
+    public void setDetails(LeadDetails details) { this.details = details; }
 }

@@ -10,7 +10,9 @@ import java.util.Iterator;
 import java.util.List;
 
 import com.example.crm.model.EmailLead;
+import com.example.crm.model.LeadDetails;
 import com.example.crm.repository.EmailLeadRepository;
+import com.example.crm.repository.LeadDetailsRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -25,14 +27,17 @@ public class InstantlyMemoryService {
     private final HttpClient httpClient;
     private final ObjectMapper mapper = new ObjectMapper();
     private final EmailLeadRepository repository;
+    private final LeadDetailsRepository detailsRepository;
 
     public InstantlyMemoryService(@Value("${instantly.api.key}") String apiKey,
             @Value("${instantly.api.base-url:https://api.instantly.ai}") String baseUrl,
-            EmailLeadRepository repository) {
+            EmailLeadRepository repository,
+            LeadDetailsRepository detailsRepository) {
         this.apiKey = apiKey;
         this.baseUrl = baseUrl;
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
         this.repository = repository;
+        this.detailsRepository = detailsRepository;
     }
 
     public List<EmailLead> getAllLeads() {
@@ -129,6 +134,14 @@ public class InstantlyMemoryService {
 
                     if (!existsById && !existsByLead) {
                         repository.save(lead);
+                        // create an empty LeadDetails record linked to this EmailLead
+                        try {
+                            LeadDetails details = new LeadDetails();
+                            details.setEmailLead(lead);
+                            detailsRepository.save(details);
+                        } catch (Exception ex) {
+                            // don't fail the whole sync if details creation fails
+                        }
                         added++;
                     }
                 }
