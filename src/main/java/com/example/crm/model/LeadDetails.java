@@ -34,6 +34,8 @@ public class LeadDetails {
 
     @Column(name = "photo_received")
     private Boolean photoReceived = false;
+    @Column(name = "file_urls", columnDefinition = "TEXT")
+    private String fileUrls; // comma-separated public URLs
 
     @Column(name = "acceptance_letter_sent")
     private Boolean acceptanceLetterSent = false;
@@ -67,6 +69,9 @@ public class LeadDetails {
 
     public Boolean getPhotoReceived() { return photoReceived; }
     public void setPhotoReceived(Boolean photoReceived) { this.photoReceived = photoReceived; }
+
+    public String getFileUrls() { return fileUrls; }
+    public void setFileUrls(String fileUrls) { this.fileUrls = fileUrls; }
 
     public Boolean getAcceptanceLetterSent() { return acceptanceLetterSent; }
     public void setAcceptanceLetterSent(Boolean acceptanceLetterSent) { this.acceptanceLetterSent = acceptanceLetterSent; }
