@@ -8,6 +8,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Iterator;
 import java.util.List;
+import java.net.URLEncoder;
 
 import com.example.crm.model.EmailLead;
 import com.example.crm.model.LeadDetails;
@@ -166,5 +167,78 @@ public class InstantlyMemoryService {
         } while (true);
 
         return added;
+    }
+
+    public String getConversationByThreadId(String threadId) throws Exception {
+        if (threadId == null) throw new IllegalArgumentException("threadId is required");
+
+        String nextToken = null;
+        com.fasterxml.jackson.databind.node.ArrayNode combined = mapper.createArrayNode();
+
+        do {
+            String q = "thread:" + threadId + (nextToken != null ? "&starting_after=" + nextToken : "");
+            String encoded = URLEncoder.encode(q, "UTF-8");
+            URI uri = URI.create(baseUrl + "/api/v2/emails?search=" + encoded);
+
+            HttpRequest req = HttpRequest.newBuilder(uri)
+                    .GET()
+                    .header("Accept", "application/json")
+                    .header("Authorization", "Bearer " + apiKey)
+                    .timeout(Duration.ofSeconds(30))
+                    .build();
+
+            HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() >= 400) {
+                throw new IllegalStateException("Instantly API returned status " + resp.statusCode() + ": " + resp.body());
+            }
+
+            com.fasterxml.jackson.databind.JsonNode root = mapper.readTree(resp.body());
+
+            // reuse logic from syncAllEmails to locate the array node
+            com.fasterxml.jackson.databind.JsonNode itemsNode = null;
+            if (root.isArray()) {
+                itemsNode = root;
+            } else {
+                if (root.has("data")) {
+                    itemsNode = root.get("data");
+                } else if (root.has("emails")) {
+                    itemsNode = root.get("emails");
+                } else {
+                    java.util.Iterator<com.fasterxml.jackson.databind.JsonNode> it = root.elements();
+                    while (it.hasNext()) {
+                        com.fasterxml.jackson.databind.JsonNode n = it.next();
+                        if (n.isArray()) {
+                            itemsNode = n;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (itemsNode != null && itemsNode.isArray()) {
+                for (com.fasterxml.jackson.databind.JsonNode item : itemsNode) {
+                    combined.add(item);
+                }
+            }
+
+            String token = null;
+            if (root.has("next_starting_after")) {
+                token = root.path("next_starting_after").asText(null);
+            }
+            if (token == null && root.has("next")) {
+                token = root.path("next").path("starting_after").asText(null);
+            }
+            if (token == null && root.has("starting_after")) {
+                token = root.path("starting_after").asText(null);
+            }
+
+            nextToken = (token == null || token.isEmpty()) ? null : token;
+            if (nextToken == null) break;
+
+        } while (true);
+
+        com.fasterxml.jackson.databind.node.ObjectNode out = mapper.createObjectNode();
+        out.set("data", combined);
+        return mapper.writeValueAsString(out);
     }
 }
