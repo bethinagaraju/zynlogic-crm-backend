@@ -6,6 +6,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.Iterator;
 import java.util.List;
 import java.net.URLEncoder;
@@ -29,16 +31,19 @@ public class InstantlyMemoryService {
     private final ObjectMapper mapper = new ObjectMapper();
     private final EmailLeadRepository repository;
     private final LeadDetailsRepository detailsRepository;
+    private final com.example.crm.repository.LeadStageRepository leadStageRepository;
 
     public InstantlyMemoryService(@Value("${instantly.api.key}") String apiKey,
             @Value("${instantly.api.base-url:https://api.instantly.ai}") String baseUrl,
             EmailLeadRepository repository,
-            LeadDetailsRepository detailsRepository) {
+            LeadDetailsRepository detailsRepository,
+            com.example.crm.repository.LeadStageRepository leadStageRepository) {
         this.apiKey = apiKey;
         this.baseUrl = baseUrl;
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
         this.repository = repository;
         this.detailsRepository = detailsRepository;
+        this.leadStageRepository = leadStageRepository;
     }
 
     public List<EmailLead> getAllLeads() {
@@ -140,6 +145,41 @@ public class InstantlyMemoryService {
                             LeadDetails details = new LeadDetails();
                             details.setEmailLead(lead);
                             detailsRepository.save(details);
+
+                            // create 8 default stages for this lead
+                            try {
+                                String[] names = new String[] {
+                                    "Reply Received",
+                                    "Warm Reply Sent",
+                                    "Details Received",
+                                    "Acceptance Email Sent",
+                                    "Added to Website",
+                                    "Share Website + Registration Link",
+                                    "Handle Requests & Objections",
+                                    "Payment Received"
+                                };
+                                int[] defaultDays = new int[] {7,1,14,2,0,1,5,14};
+                                for (int si = 0; si < names.length; si++) {
+                                    com.example.crm.model.LeadStage stage = new com.example.crm.model.LeadStage();
+                                    stage.setEmailLead(lead);
+                                    stage.setStageIndex(si + 1);
+                                    stage.setStageName(names[si]);
+                                    stage.setDefaultDays(defaultDays[si]);
+                                    stage.setDays(defaultDays[si]);
+                                    stage.setCompleted(false);
+                                    // compute dueAt in IST, then store as Instant (UTC)
+                                    try {
+                                        ZonedDateTime nowIst = ZonedDateTime.now(ZoneId.of("Asia/Kolkata"));
+                                        stage.setDueAt(nowIst.plusDays(defaultDays[si]).toInstant());
+                                    } catch (Exception ex3) {
+                                        stage.setDueAt(Instant.now());
+                                    }
+                                    leadStageRepository.save(stage);
+                                }
+                            } catch (Exception ex2) {
+                                // ignore stage creation failures
+                            }
+
                         } catch (Exception ex) {
                             // don't fail the whole sync if details creation fails
                         }
