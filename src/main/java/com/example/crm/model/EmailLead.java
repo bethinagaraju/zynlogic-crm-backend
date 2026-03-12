@@ -1,6 +1,7 @@
 package com.example.crm.model;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -57,11 +58,23 @@ public class EmailLead {
     @Column(name = "thread_id")
     private String threadId;
 
+    @Column(name = "due_date")
+    private Instant dueDate;
+
+    @Column(name = "current_stage")
+    private Integer currentStage;
+
     @OneToOne(mappedBy = "emailLead", cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonManagedReference
     private LeadDetails details;
 
     public EmailLead() {
+        try {
+            this.dueDate = Instant.now().plus(1, ChronoUnit.DAYS);
+        } catch (Exception ex) {
+            this.dueDate = Instant.now();
+        }
+        this.currentStage = 1;
     }
 
     // Getters and setters
@@ -109,6 +122,16 @@ public class EmailLead {
 
     public String getThreadId() { return threadId; }
     public void setThreadId(String threadId) { this.threadId = threadId; }
+
+    public Instant getDueDate() { return dueDate; }
+    public void setDueDate(Instant dueDate) { this.dueDate = dueDate; }
+
+    public Integer getCurrentStage() { return currentStage; }
+    public void setCurrentStage(Integer currentStage) { this.currentStage = currentStage; }
+
+    // compatibility with existing code that uses getDueAt()/setDueAt()
+    public Instant getDueAt() { return this.dueDate; }
+    public void setDueAt(Instant dueAt) { this.dueDate = dueAt; }
 
     public LeadDetails getDetails() { return details; }
     public void setDetails(LeadDetails details) { this.details = details; }
