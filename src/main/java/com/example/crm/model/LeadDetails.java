@@ -37,6 +37,42 @@ public class LeadDetails {
     @Column(name = "file_urls", columnDefinition = "TEXT")
     private String fileUrls; // comma-separated public URLs
 
+    @Column(name = "passport")
+    private Boolean passport = false;
+
+    @Column(name = "asked_pricing")
+    private Boolean askedPricing = false;
+
+    @Column(name = "asked_travel_support")
+    private Boolean askedTravelSupport = false;
+
+    @Column(name = "fee_waiver")
+    private Boolean feeWaiver = false;
+
+    @Column(name = "wants_virtual")
+    private Boolean wantsVirtual = false;
+
+    @Column(name = "wants_in_person")
+    private Boolean wantsInPerson = false;
+
+    @Column(name = "schedule_conflict")
+    private Boolean scheduleConflict = false;
+
+    @Column(name = "needs_approval")
+    private Boolean needsApproval = false;
+
+    @Column(name = "student_joining")
+    private Boolean studentJoining = false;
+
+    @Column(name = "on_website")
+    private Boolean onWebsite = false;
+
+    @Column(name = "reinvite_next_year")
+    private Boolean reinviteNextYear = false;
+
+    @Column(name = "title_submission")
+    private Boolean titleSubmission = false;
+
     @Column(name = "acceptance_letter_sent")
     private Boolean acceptanceLetterSent = false;
 
@@ -78,6 +114,42 @@ public class LeadDetails {
 
     public Boolean getRegistrationCompleted() { return registrationCompleted; }
     public void setRegistrationCompleted(Boolean registrationCompleted) { this.registrationCompleted = registrationCompleted; }
+
+    public Boolean getPassport() { return passport; }
+    public void setPassport(Boolean passport) { this.passport = passport; }
+
+    public Boolean getAskedPricing() { return askedPricing; }
+    public void setAskedPricing(Boolean askedPricing) { this.askedPricing = askedPricing; }
+
+    public Boolean getAskedTravelSupport() { return askedTravelSupport; }
+    public void setAskedTravelSupport(Boolean askedTravelSupport) { this.askedTravelSupport = askedTravelSupport; }
+
+    public Boolean getFeeWaiver() { return feeWaiver; }
+    public void setFeeWaiver(Boolean feeWaiver) { this.feeWaiver = feeWaiver; }
+
+    public Boolean getWantsVirtual() { return wantsVirtual; }
+    public void setWantsVirtual(Boolean wantsVirtual) { this.wantsVirtual = wantsVirtual; }
+
+    public Boolean getWantsInPerson() { return wantsInPerson; }
+    public void setWantsInPerson(Boolean wantsInPerson) { this.wantsInPerson = wantsInPerson; }
+
+    public Boolean getScheduleConflict() { return scheduleConflict; }
+    public void setScheduleConflict(Boolean scheduleConflict) { this.scheduleConflict = scheduleConflict; }
+
+    public Boolean getNeedsApproval() { return needsApproval; }
+    public void setNeedsApproval(Boolean needsApproval) { this.needsApproval = needsApproval; }
+
+    public Boolean getStudentJoining() { return studentJoining; }
+    public void setStudentJoining(Boolean studentJoining) { this.studentJoining = studentJoining; }
+
+    public Boolean getOnWebsite() { return onWebsite; }
+    public void setOnWebsite(Boolean onWebsite) { this.onWebsite = onWebsite; }
+
+    public Boolean getReinviteNextYear() { return reinviteNextYear; }
+    public void setReinviteNextYear(Boolean reinviteNextYear) { this.reinviteNextYear = reinviteNextYear; }
+
+    public Boolean getTitleSubmission() { return titleSubmission; }
+    public void setTitleSubmission(Boolean titleSubmission) { this.titleSubmission = titleSubmission; }
 
     public String getPaymentStatus() { return paymentStatus; }
     public void setPaymentStatus(String paymentStatus) { this.paymentStatus = paymentStatus; }

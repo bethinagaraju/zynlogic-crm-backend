@@ -68,6 +68,9 @@ public class EmailLead {
     @JsonManagedReference
     private LeadDetails details;
 
+    @Column(name = "lead_name")
+    private String leadName;
+
     public EmailLead() {
         try {
             this.dueDate = Instant.now().plus(1, ChronoUnit.DAYS);
@@ -135,4 +138,7 @@ public class EmailLead {
 
     public LeadDetails getDetails() { return details; }
     public void setDetails(LeadDetails details) { this.details = details; }
+
+    public String getLeadName() { return leadName; }
+    public void setLeadName(String leadName) { this.leadName = leadName; }
 }
