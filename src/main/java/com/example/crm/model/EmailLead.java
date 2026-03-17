@@ -71,6 +71,12 @@ public class EmailLead {
     @Column(name = "lead_name")
     private String leadName;
 
+    @Column(name = "profile_pic", nullable = true)
+    private String profilePic;
+
+    @Column(name = "lead_type", nullable = true)
+    private String leadType;
+
     public EmailLead() {
         try {
             this.dueDate = Instant.now().plus(1, ChronoUnit.DAYS);
@@ -78,6 +84,7 @@ public class EmailLead {
             this.dueDate = Instant.now();
         }
         this.currentStage = 1;
+        this.leadType = "Interested";
     }
 
     // Getters and setters
@@ -141,4 +148,10 @@ public class EmailLead {
 
     public String getLeadName() { return leadName; }
     public void setLeadName(String leadName) { this.leadName = leadName; }
+
+    public String getProfilePic() { return profilePic; }
+    public void setProfilePic(String profilePic) { this.profilePic = profilePic; }
+
+    public String getLeadType() { return leadType; }
+    public void setLeadType(String leadType) { this.leadType = leadType; }
 }

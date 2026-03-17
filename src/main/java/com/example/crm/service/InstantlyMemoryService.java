@@ -45,12 +45,79 @@ public class InstantlyMemoryService {
     }
 
     public List<EmailLead> getAllLeads() {
-        java.util.List<EmailLead> leads = repository.findAll();
+        java.util.List<EmailLead> leads = repository.findAllByOrderByTimestampCreatedDesc();
         // No LeadStage tracking; return leads as stored
         for (EmailLead lead : leads) {
             // nothing to compute here
         }
         return leads;
+    }
+
+    public org.springframework.data.domain.Page<EmailLead> getLeads(org.springframework.data.domain.Pageable pageable) {
+        return repository.findAllByOrderByTimestampCreatedDesc(pageable);
+    }
+
+    public org.springframework.data.domain.Page<EmailLead> getLeads(org.springframework.data.domain.Pageable pageable, String leadType) {
+        if (leadType == null || leadType.isBlank()) {
+            return getLeads(pageable);
+        }
+        return repository.findByLeadTypeOrderByTimestampCreatedDesc(leadType, pageable);
+    }
+
+    public org.springframework.data.domain.Page<EmailLead> getLeads(org.springframework.data.domain.Pageable pageable, String leadType, Integer currentStage) {
+        boolean hasLeadType = leadType != null && !leadType.isBlank();
+        boolean hasStage = currentStage != null;
+
+        if (!hasLeadType && !hasStage) {
+            return getLeads(pageable);
+        }
+        if (hasLeadType && !hasStage) {
+            return getLeads(pageable, leadType);
+        }
+        if (!hasLeadType && hasStage) {
+            return repository.findByCurrentStageOrderByTimestampCreatedDesc(currentStage, pageable);
+        }
+        // both provided
+        return repository.findByLeadTypeAndCurrentStageOrderByTimestampCreatedDesc(leadType, currentStage, pageable);
+    }
+
+    public org.springframework.data.domain.Page<EmailLead> getLeadsDueSoon(org.springframework.data.domain.Pageable pageable) {
+        return repository.findAllOrderByDueDateNullsLast(pageable);
+    }
+
+    public org.springframework.data.domain.Page<EmailLead> getLeadsDueSoon(org.springframework.data.domain.Pageable pageable, String leadType) {
+        if (leadType == null || leadType.isBlank()) {
+            return getLeadsDueSoon(pageable);
+        }
+        return repository.findByLeadTypeOrderByDueDateNullsLast(leadType, pageable);
+    }
+
+    public org.springframework.data.domain.Page<EmailLead> getLeadsByFromAddress(String fromAddressEmail, org.springframework.data.domain.Pageable pageable) {
+        return repository.findByFromAddressEmailOrderByTimestampCreatedDesc(fromAddressEmail, pageable);
+    }
+
+    public java.util.Map<String, Long> getLeadsStatistics() {
+        long total = repository.count();
+
+        java.time.ZoneId zone = java.time.ZoneId.systemDefault();
+        java.time.ZonedDateTime nowZ = java.time.ZonedDateTime.now(zone);
+        java.time.ZonedDateTime startOfToday = nowZ.toLocalDate().atStartOfDay(zone);
+        java.time.ZonedDateTime startOfTomorrow = startOfToday.plusDays(1);
+
+        java.time.Instant nowInstant = java.time.Instant.now();
+        // overdue should be dates before the start of today to avoid double-counting items due earlier today
+        long overdue = repository.countByDueDateBefore(startOfToday.toInstant());
+
+        long replyToday = repository.countByDueDateBetween(startOfToday.toInstant(), startOfTomorrow.toInstant());
+
+        long conversions = repository.countByCurrentStage(9);
+
+        return java.util.Map.of(
+                "totalleads", total,
+                "overdue", overdue,
+                "replytoday", replyToday,
+                "conversions", conversions
+        );
     }
 
     public int syncAllEmails() throws Exception {

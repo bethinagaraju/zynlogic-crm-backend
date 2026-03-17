@@ -11,20 +11,29 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.RequestParam;
 
 import java.util.List;
 import java.util.Comparator;
+import java.net.URI;
 
 @RestController
 public class GetLeadsController {
 
     private final InstantlyMemoryService memoryService;
     private final EmailLeadRepository repository;
+    private final com.example.crm.service.FtpService ftpService;
 
-    public GetLeadsController(InstantlyMemoryService memoryService, EmailLeadRepository repository) {
+    @Value("${hostinger.ftp.crm-upload-path:/uploads/crm}")
+    private String crmUploadPath;
+
+    public GetLeadsController(InstantlyMemoryService memoryService, EmailLeadRepository repository,
+                              com.example.crm.service.FtpService ftpService) {
         this.memoryService = memoryService;
         this.repository = repository;
+        this.ftpService = ftpService;
     }
     @GetMapping("/sync")
     public ResponseEntity<String> sync() {
@@ -39,17 +48,39 @@ public class GetLeadsController {
     }
 
     @GetMapping("/get-leads")
-    public ResponseEntity<List<EmailLead>> getLeads() {
-        List<EmailLead> leads = memoryService.getAllLeads();
-        return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(leads);
+    public ResponseEntity<?> getLeads(@RequestParam(value = "page", defaultValue = "0") int page,
+                                      @RequestParam(value = "size", defaultValue = "20") int size,
+                                      @RequestParam(value = "leadType", required = false) String leadType,
+                                      @RequestParam(value = "currentStage", required = false) Integer currentStage) {
+        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(Math.max(0, page), Math.max(1, size));
+        org.springframework.data.domain.Page<EmailLead> leadsPage = memoryService.getLeads(pageable, leadType, currentStage);
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(leadsPage);
     }
 
     @GetMapping("/get-leads/due-soon")
-    public ResponseEntity<List<EmailLead>> getLeadsDueSoon() {
-        List<EmailLead> leads = memoryService.getAllLeads();
-        leads.sort(Comparator.comparing(EmailLead::getDueAt, Comparator.nullsLast(Comparator.naturalOrder())));
-        return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(leads);
+    public ResponseEntity<?> getLeadsDueSoon(@RequestParam(value = "page", defaultValue = "0") int page,
+                                              @RequestParam(value = "size", defaultValue = "20") int size,
+                                              @RequestParam(value = "leadType", required = false) String leadType) {
+        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(Math.max(0, page), Math.max(1, size));
+        org.springframework.data.domain.Page<EmailLead> leadsPage = memoryService.getLeadsDueSoon(pageable, leadType);
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(leadsPage);
     }
+
+        @GetMapping("/get-leads/by-from-address")
+        public ResponseEntity<?> getLeadsByFromAddress(@RequestParam("fromAddressEmail") String fromAddressEmail,
+                               @RequestParam(value = "page", defaultValue = "0") int page,
+                               @RequestParam(value = "size", defaultValue = "20") int size) {
+        org.springframework.data.domain.Page<EmailLead> leadsPage = memoryService.getLeadsByFromAddress(
+            fromAddressEmail,
+            org.springframework.data.domain.PageRequest.of(Math.max(0, page), Math.max(1, size)));
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(leadsPage);
+        }
+
+        @GetMapping("/get-leads/count")
+        public ResponseEntity<?> getLeadsCount() {
+            java.util.Map<String, Long> stats = memoryService.getLeadsStatistics();
+            return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(stats);
+        }
 
     @GetMapping("/get-conversation-by-thread-id")
     public ResponseEntity<String> getConversationByThreadId(@RequestParam("threadId") String threadId) {
@@ -231,6 +262,73 @@ public class GetLeadsController {
         lead.setLeadName(req.getLeadName());
         repository.save(lead);
         return ResponseEntity.ok().body(lead);
+    }
+
+    public static class LeadTypeRequest {
+        private String leadType;
+        public String getLeadType() { return leadType; }
+        public void setLeadType(String leadType) { this.leadType = leadType; }
+    }
+
+    @PutMapping("/email-leads/{id}/lead-type")
+    public ResponseEntity<?> updateLeadType(@PathVariable String id, @RequestBody LeadTypeRequest req) {
+        if (req == null || req.getLeadType() == null) {
+            return ResponseEntity.badRequest().body(java.util.Map.of("error", "leadType is required"));
+        }
+        java.util.Optional<EmailLead> opt = repository.findById(id);
+        if (opt.isEmpty()) return ResponseEntity.status(404).body(java.util.Map.of("error", "EmailLead not found"));
+        EmailLead lead = opt.get();
+        lead.setLeadType(req.getLeadType());
+        repository.save(lead);
+        return ResponseEntity.ok().body(lead);
+    }
+
+    @PutMapping(value = "/email-leads/{id}/profile-pic", consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<?> uploadProfilePic(@PathVariable String id, @RequestParam("file") MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            return ResponseEntity.badRequest().body(java.util.Map.of("error", "file is required"));
+        }
+
+        java.util.Optional<EmailLead> opt = repository.findById(id);
+        if (opt.isEmpty()) return ResponseEntity.status(404).body(java.util.Map.of("error", "EmailLead not found"));
+        EmailLead lead = opt.get();
+
+        try {
+            // Delete existing profile pic if present
+            String existing = lead.getProfilePic();
+            if (existing != null && !existing.isBlank()) {
+                try { ftpService.deleteByPublicUrl(existing); } catch (Exception ex) { /* ignore delete failures */ }
+            }
+
+            String remoteDir = crmUploadPath;
+            if (remoteDir == null) remoteDir = "/uploads/crm";
+            // place profile pics under a per-lead folder
+            if (!remoteDir.endsWith("/")) remoteDir += "/";
+            remoteDir += "profile-pics/" + id;
+
+            String url = ftpService.upload(file, remoteDir);
+            lead.setProfilePic(url);
+            repository.save(lead);
+            return ResponseEntity.ok().body(java.util.Map.of("profilePic", url));
+        } catch (Exception ex) {
+            return ResponseEntity.status(500).body(java.util.Map.of("error", ex.getMessage()));
+        }
+    }
+
+    @GetMapping("/email-leads/{id}/profile-pic")
+    public ResponseEntity<?> getProfilePic(@PathVariable String id,
+                                           @RequestParam(value = "redirect", defaultValue = "false") boolean redirect) {
+        java.util.Optional<EmailLead> opt = repository.findById(id);
+        if (opt.isEmpty()) return ResponseEntity.status(404).body(java.util.Map.of("error", "EmailLead not found"));
+        EmailLead lead = opt.get();
+        String url = lead.getProfilePic();
+        if (url == null || url.isBlank()) {
+            return ResponseEntity.status(404).body(java.util.Map.of("error", "profilePic not set"));
+        }
+        if (redirect) {
+            return ResponseEntity.status(302).location(URI.create(url)).build();
+        }
+        return ResponseEntity.ok().body(java.util.Map.of("profilePic", url));
     }
 
 }
