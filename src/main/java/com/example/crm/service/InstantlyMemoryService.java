@@ -32,16 +32,19 @@ public class InstantlyMemoryService {
     private final ObjectMapper mapper = new ObjectMapper();
     private final EmailLeadRepository repository;
     private final LeadDetailsRepository detailsRepository;
+    private final java.time.ZoneId appZoneId;
 
     public InstantlyMemoryService(@Value("${instantly.api.key}") String apiKey,
             @Value("${instantly.api.base-url:https://api.instantly.ai}") String baseUrl,
             EmailLeadRepository repository,
-            LeadDetailsRepository detailsRepository) {
+            LeadDetailsRepository detailsRepository,
+            @Value("${app.timezone:Asia/Kolkata}") String appTimezone) {
         this.apiKey = apiKey;
         this.baseUrl = baseUrl;
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
         this.repository = repository;
         this.detailsRepository = detailsRepository;
+        this.appZoneId = java.time.ZoneId.of(appTimezone == null ? "Asia/Kolkata" : appTimezone);
     }
 
     public List<EmailLead> getAllLeads() {
@@ -81,6 +84,156 @@ public class InstantlyMemoryService {
         return repository.findByLeadTypeAndCurrentStageOrderByTimestampCreatedDesc(leadType, currentStage, pageable);
     }
 
+    public org.springframework.data.domain.Page<EmailLead> getLeads(org.springframework.data.domain.Pageable pageable, String leadType, Integer currentStage, String dueFilter) {
+        org.springframework.data.jpa.domain.Specification<EmailLead> spec = org.springframework.data.jpa.domain.Specification.where(null);
+
+        if (leadType != null && !leadType.isBlank()) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("leadType"), leadType));
+        }
+        if (currentStage != null) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("currentStage"), currentStage));
+        }
+
+        if (dueFilter != null && !dueFilter.isBlank()) {
+            java.time.ZonedDateTime nowZ = java.time.ZonedDateTime.now(this.appZoneId);
+            java.time.ZonedDateTime startOfToday = nowZ.toLocalDate().atStartOfDay(this.appZoneId);
+            java.time.Instant startToday = startOfToday.toInstant();
+            java.time.Instant startTomorrow = startOfToday.plusDays(1).toInstant();
+            java.time.Instant startDayAfterTomorrow = startOfToday.plusDays(2).toInstant();
+            java.time.Instant startThreeDays = startOfToday.plusDays(3).toInstant();
+            java.time.Instant startFourDays = startOfToday.plusDays(4).toInstant();
+
+            switch (dueFilter) {
+                case "overdue":
+                    spec = spec.and((root, query, cb) -> cb.and(cb.isNotNull(root.get("dueDate")), cb.lessThan(root.get("dueDate"), startToday)));
+                    break;
+                case "replyToday":
+                    spec = spec.and((root, query, cb) -> cb.and(cb.greaterThanOrEqualTo(root.get("dueDate"), startToday), cb.lessThan(root.get("dueDate"), startTomorrow)));
+                    break;
+                case "1dayLeft":
+                    spec = spec.and((root, query, cb) -> cb.and(cb.greaterThanOrEqualTo(root.get("dueDate"), startTomorrow), cb.lessThan(root.get("dueDate"), startDayAfterTomorrow)));
+                    break;
+                case "2daysLeft":
+                    spec = spec.and((root, query, cb) -> cb.and(cb.greaterThanOrEqualTo(root.get("dueDate"), startDayAfterTomorrow), cb.lessThan(root.get("dueDate"), startThreeDays)));
+                    break;
+                case "3daysLeft":
+                    spec = spec.and((root, query, cb) -> cb.and(cb.greaterThanOrEqualTo(root.get("dueDate"), startThreeDays), cb.lessThan(root.get("dueDate"), startFourDays)));
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        return repository.findAll(spec, pageable);
+    }
+
+    public org.springframework.data.domain.Page<EmailLead> getLeads(org.springframework.data.domain.Pageable pageable, String leadType, Integer currentStage, String dueFilter, String tagsCsv, String tagsMode) {
+        org.springframework.data.jpa.domain.Specification<EmailLead> spec = org.springframework.data.jpa.domain.Specification.where(null);
+
+        if (leadType != null && !leadType.isBlank()) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("leadType"), leadType));
+        }
+        if (currentStage != null) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("currentStage"), currentStage));
+        }
+
+        if (dueFilter != null && !dueFilter.isBlank()) {
+            java.time.ZonedDateTime nowZ = java.time.ZonedDateTime.now(this.appZoneId);
+            java.time.ZonedDateTime startOfToday = nowZ.toLocalDate().atStartOfDay(this.appZoneId);
+            java.time.Instant startToday = startOfToday.toInstant();
+            java.time.Instant startTomorrow = startOfToday.plusDays(1).toInstant();
+            java.time.Instant startDayAfterTomorrow = startOfToday.plusDays(2).toInstant();
+            java.time.Instant startThreeDays = startOfToday.plusDays(3).toInstant();
+            java.time.Instant startFourDays = startOfToday.plusDays(4).toInstant();
+
+            switch (dueFilter) {
+                case "overdue":
+                    spec = spec.and((root, query, cb) -> cb.and(cb.isNotNull(root.get("dueDate")), cb.lessThan(root.get("dueDate"), startToday)));
+                    break;
+                case "replyToday":
+                    spec = spec.and((root, query, cb) -> cb.and(cb.greaterThanOrEqualTo(root.get("dueDate"), startToday), cb.lessThan(root.get("dueDate"), startTomorrow)));
+                    break;
+                case "1dayLeft":
+                    spec = spec.and((root, query, cb) -> cb.and(cb.greaterThanOrEqualTo(root.get("dueDate"), startTomorrow), cb.lessThan(root.get("dueDate"), startDayAfterTomorrow)));
+                    break;
+                case "2daysLeft":
+                    spec = spec.and((root, query, cb) -> cb.and(cb.greaterThanOrEqualTo(root.get("dueDate"), startDayAfterTomorrow), cb.lessThan(root.get("dueDate"), startThreeDays)));
+                    break;
+                case "3daysLeft":
+                    spec = spec.and((root, query, cb) -> cb.and(cb.greaterThanOrEqualTo(root.get("dueDate"), startThreeDays), cb.lessThan(root.get("dueDate"), startFourDays)));
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        // Tags filter: comma-separated tag keys mapping to LeadDetails boolean fields.
+        if (tagsCsv != null && !tagsCsv.isBlank()) {
+            String[] tags = java.util.Arrays.stream(tagsCsv.split(","))
+                    .map(String::trim).filter(s->!s.isEmpty()).toArray(String[]::new);
+            boolean requireAll = tagsMode == null || !tagsMode.equalsIgnoreCase("any");
+
+            spec = spec.and((root, query, cb) -> {
+                jakarta.persistence.criteria.Join<Object, Object> join = root.join("details", jakarta.persistence.criteria.JoinType.LEFT);
+                java.util.List<jakarta.persistence.criteria.Predicate> predicates = new java.util.ArrayList<>();
+                for (String t : tags) {
+                    String field = mapTagToField(t);
+                    if (field == null) continue;
+                    predicates.add(cb.isTrue(join.get(field)));
+                }
+                if (predicates.isEmpty()) return cb.conjunction();
+                if (requireAll) {
+                    return cb.and(predicates.toArray(new jakarta.persistence.criteria.Predicate[0]));
+                } else {
+                    return cb.or(predicates.toArray(new jakarta.persistence.criteria.Predicate[0]));
+                }
+            });
+        }
+
+        return repository.findAll(spec, pageable);
+    }
+
+    // Map friendly tag names to LeadDetails boolean field names
+    private static String mapTagToField(String tag) {
+        if (tag == null) return null;
+        String t = tag.trim().toLowerCase();
+        return switch (t) {
+            case "invitation", "invitationletter", "invitationlettersent", "invitation_letter_sent" -> "invitationLetterSent";
+            case "abstract", "abstractreceived", "abstract_received" -> "abstractReceived";
+            case "bio", "bioreceived", "bio_received" -> "bioReceived";
+            case "photo", "photoreceived", "photo_received" -> "photoReceived";
+            case "passport" -> "passport";
+            case "pricing", "askedpricing", "asked_pricing" -> "askedPricing";
+            case "travel", "askedtravelsupport", "asked_travel_support" -> "askedTravelSupport";
+            case "feewaiver", "fee_waiver" -> "feeWaiver";
+            case "virtual", "wantsvirtual", "wants_virtual" -> "wantsVirtual";
+            case "inperson", "wantsinperson", "wants_in_person" -> "wantsInPerson";
+            case "schedule", "scheduleconflict", "schedule_conflict" -> "scheduleConflict";
+            case "needsapproval", "needs_approval" -> "needsApproval";
+            case "student", "studentjoining", "student_joining" -> "studentJoining";
+            case "onwebsite", "on_website" -> "onWebsite";
+            case "reinvite", "reinvite_next_year" -> "reinviteNextYear";
+            case "title", "titlesubmission", "title_submission" -> "titleSubmission";
+            case "acceptance", "acceptancelettersent", "acceptance_letter_sent" -> "acceptanceLetterSent";
+            case "registration", "registrationcompleted", "registration_completed" -> "registrationCompleted";
+            default -> null;
+        };
+    }
+
+    // Normalize leadType strings to canonical categories (handles variants and simple typos)
+    private static String normalizeLeadType(String s) {
+        if (s == null) return "Unknown";
+        String t = s.trim();
+        if (t.isEmpty()) return "Unknown";
+        String key = t.toLowerCase().replaceAll("[^a-z0-9]", "");
+        if (key.contains("dead")) return "Dead";
+        // common patterns for Not Interested (handle hyphens, spaces, minor misspellings)
+        if (key.contains("notinterested") || (key.contains("not") && (key.contains("interest") || key.contains("intrest") || key.contains("interested"))) || key.contains("nnot") ) return "Not Interested";
+        if (key.contains("interested")) return "Interested";
+        // default: title-case the original trimmed string
+        return Character.toUpperCase(t.charAt(0)) + (t.length() > 1 ? t.substring(1) : "");
+    }
+
     public org.springframework.data.domain.Page<EmailLead> getLeadsDueSoon(org.springframework.data.domain.Pageable pageable) {
         return repository.findAllOrderByDueDateNullsLast(pageable);
     }
@@ -98,26 +251,93 @@ public class InstantlyMemoryService {
 
     public java.util.Map<String, Long> getLeadsStatistics() {
         long total = repository.count();
-
-        java.time.ZoneId zone = java.time.ZoneId.systemDefault();
-        java.time.ZonedDateTime nowZ = java.time.ZonedDateTime.now(zone);
-        java.time.ZonedDateTime startOfToday = nowZ.toLocalDate().atStartOfDay(zone);
+        java.time.ZonedDateTime nowZ = java.time.ZonedDateTime.now(this.appZoneId);
+        java.time.ZonedDateTime startOfToday = nowZ.toLocalDate().atStartOfDay(this.appZoneId);
         java.time.ZonedDateTime startOfTomorrow = startOfToday.plusDays(1);
+        java.time.ZonedDateTime startOfDayAfterTomorrow = startOfToday.plusDays(2);
 
         java.time.Instant nowInstant = java.time.Instant.now();
-        // overdue should be dates before the start of today to avoid double-counting items due earlier today
+        // overdue should be dates before the start of today (in configured app timezone)
         long overdue = repository.countByDueDateBefore(startOfToday.toInstant());
 
         long replyToday = repository.countByDueDateBetween(startOfToday.toInstant(), startOfTomorrow.toInstant());
+        long oneDayLeft = repository.countByDueDateBetween(startOfTomorrow.toInstant(), startOfDayAfterTomorrow.toInstant());
 
         long conversions = repository.countByCurrentStage(9);
 
-        return java.util.Map.of(
-                "totalleads", total,
-                "overdue", overdue,
-                "replytoday", replyToday,
-                "conversions", conversions
-        );
+        // Aggregate counts by leadType (grouped) and normalize variants/typos to canonical keys
+        java.util.List<java.lang.Object[]> grouped = repository.countGroupByLeadType();
+        java.util.Map<String, Long> normalized = new java.util.HashMap<>();
+        if (grouped != null) {
+            for (java.lang.Object[] row : grouped) {
+                String lt = row[0] == null ? null : row[0].toString();
+                long cnt = row[1] == null ? 0L : ((Number) row[1]).longValue();
+                String key = normalizeLeadType(lt);
+                normalized.put(key, normalized.getOrDefault(key, 0L) + cnt);
+            }
+        }
+        long interested = normalized.getOrDefault("Interested", 0L);
+        long notInterested = normalized.getOrDefault("Not Interested", 0L);
+        long dead = normalized.getOrDefault("Dead", 0L);
+
+        // LeadDetails-based tag counts
+        long invitationLetterSent = detailsRepository.countByInvitationLetterSentTrue();
+        long abstractReceived = detailsRepository.countByAbstractReceivedTrue();
+        long bioReceived = detailsRepository.countByBioReceivedTrue();
+        long photoReceived = detailsRepository.countByPhotoReceivedTrue();
+        long acceptanceLetterSent = detailsRepository.countByAcceptanceLetterSentTrue();
+        long registrationCompleted = detailsRepository.countByRegistrationCompletedTrue();
+        long passport = detailsRepository.countByPassportTrue();
+        long askedPricing = detailsRepository.countByAskedPricingTrue();
+        long askedTravelSupport = detailsRepository.countByAskedTravelSupportTrue();
+        long feeWaiver = detailsRepository.countByFeeWaiverTrue();
+        long wantsVirtual = detailsRepository.countByWantsVirtualTrue();
+        long wantsInPerson = detailsRepository.countByWantsInPersonTrue();
+        long scheduleConflict = detailsRepository.countByScheduleConflictTrue();
+        long needsApproval = detailsRepository.countByNeedsApprovalTrue();
+        long studentJoining = detailsRepository.countByStudentJoiningTrue();
+        long onWebsite = detailsRepository.countByOnWebsiteTrue();
+        long reinviteNextYear = detailsRepository.countByReinviteNextYearTrue();
+        long titleSubmission = detailsRepository.countByTitleSubmissionTrue();
+
+        java.util.Map<String, Long> map = new java.util.LinkedHashMap<>();
+        map.put("totalleads", total);
+        map.put("overdue", overdue);
+        map.put("replytoday", replyToday);
+        map.put("conversions", conversions);
+        map.put("1dayLeft", oneDayLeft);
+
+        map.put("interested", interested);
+        map.put("notInterested", notInterested);
+        map.put("dead", dead);
+
+        // Also include breakdown per normalized leadType for visibility
+        for (java.util.Map.Entry<String, Long> e : normalized.entrySet()) {
+            String k = e.getKey().replaceAll("\\s+", "");
+            // keep keys concise in JSON: e.g., "leadType_Interested"
+            map.put("leadType_" + k, e.getValue());
+        }
+
+        map.put("invitationLetterSent", invitationLetterSent);
+        map.put("abstractReceived", abstractReceived);
+        map.put("bioReceived", bioReceived);
+        map.put("photoReceived", photoReceived);
+        map.put("acceptanceLetterSent", acceptanceLetterSent);
+        map.put("registrationCompleted", registrationCompleted);
+        map.put("passport", passport);
+        map.put("askedPricing", askedPricing);
+        map.put("askedTravelSupport", askedTravelSupport);
+        map.put("feeWaiver", feeWaiver);
+        map.put("wantsVirtual", wantsVirtual);
+        map.put("wantsInPerson", wantsInPerson);
+        map.put("scheduleConflict", scheduleConflict);
+        map.put("needsApproval", needsApproval);
+        map.put("studentJoining", studentJoining);
+        map.put("onWebsite", onWebsite);
+        map.put("reinviteNextYear", reinviteNextYear);
+        map.put("titleSubmission", titleSubmission);
+
+        return map;
     }
 
     public int syncAllEmails() throws Exception {

@@ -50,10 +50,13 @@ public class GetLeadsController {
     @GetMapping("/get-leads")
     public ResponseEntity<?> getLeads(@RequestParam(value = "page", defaultValue = "0") int page,
                                       @RequestParam(value = "size", defaultValue = "20") int size,
-                                      @RequestParam(value = "leadType", required = false) String leadType,
-                                      @RequestParam(value = "currentStage", required = false) Integer currentStage) {
+                                      @RequestParam(required = false) String leadType,
+                                      @RequestParam(required = false) Integer currentStage,
+                                      @RequestParam(value = "due", required = false) String due,
+                                      @RequestParam(value = "tags", required = false) String tags,
+                                      @RequestParam(value = "tagsMode", required = false, defaultValue = "all") String tagsMode) {
         org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(Math.max(0, page), Math.max(1, size));
-        org.springframework.data.domain.Page<EmailLead> leadsPage = memoryService.getLeads(pageable, leadType, currentStage);
+        org.springframework.data.domain.Page<EmailLead> leadsPage = memoryService.getLeads(pageable, leadType, currentStage, due, tags, tagsMode);
         return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(leadsPage);
     }
 

@@ -4,10 +4,11 @@ import com.example.crm.model.EmailLead;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 
 import java.util.List;
 
-public interface EmailLeadRepository extends JpaRepository<EmailLead, String> {
+public interface EmailLeadRepository extends JpaRepository<EmailLead, String>, JpaSpecificationExecutor<EmailLead> {
 
 	boolean existsByLead(String lead);
 
@@ -49,5 +50,10 @@ public interface EmailLeadRepository extends JpaRepository<EmailLead, String> {
 	long countByDueDateBetween(java.time.Instant startInclusive, java.time.Instant endExclusive);
 
 	long countByCurrentStage(Integer currentStage);
+
+	long countByLeadTypeIgnoreCase(String leadType);
+
+	@org.springframework.data.jpa.repository.Query("SELECT e.leadType, COUNT(e) FROM EmailLead e GROUP BY e.leadType")
+	java.util.List<java.lang.Object[]> countGroupByLeadType();
 
 }
