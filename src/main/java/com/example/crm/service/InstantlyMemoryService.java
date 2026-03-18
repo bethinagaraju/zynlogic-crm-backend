@@ -472,6 +472,142 @@ public class InstantlyMemoryService {
         return added;
     }
 
+    /**
+     * Process an Instantly.ai webhook payload (JSON body). Returns number of leads created/updated.
+     */
+    public int processWebhookPayload(String body) {
+        int processed = 0;
+        try {
+            com.fasterxml.jackson.databind.JsonNode root = mapper.readTree(body);
+
+            // Support common webhook shapes. First, handle single-object webhook with `lead` + `reply`.
+            com.fasterxml.jackson.databind.JsonNode itemsNode = null;
+            if (root.has("lead") && root.has("reply")) {
+                com.fasterxml.jackson.databind.node.ObjectNode item = mapper.createObjectNode();
+                com.fasterxml.jackson.databind.JsonNode leadNode = root.get("lead");
+                com.fasterxml.jackson.databind.JsonNode replyNode = root.get("reply");
+
+                item.put("id", leadNode.path("id").asText(null));
+                // store lead email in the `lead` column (existing code expects this)
+                if (leadNode.has("email")) item.put("lead", leadNode.path("email").asText(null));
+                if (leadNode.has("first_name") || leadNode.has("last_name")) {
+                    String fn = leadNode.path("first_name").asText("");
+                    String ln = leadNode.path("last_name").asText("");
+                    String fullname = (fn + " " + ln).trim();
+                    if (!fullname.isEmpty()) item.put("lead_name", fullname);
+                }
+                if (root.has("campaign") && root.get("campaign").has("id")) item.put("campaign_id", root.get("campaign").path("id").asText(null));
+                if (root.has("email_account") && root.get("email_account").has("email")) item.put("from_address_email", root.get("email_account").path("email").asText(null));
+
+                if (replyNode.has("email_id")) item.put("thread_id", replyNode.path("email_id").asText(null));
+                if (replyNode.has("received_at")) item.put("timestamp_email", replyNode.path("received_at").asText(null));
+                if (replyNode.has("body")) item.put("body", replyNode.path("body").asText(null));
+
+                // simple heuristic: if reply body mentions 'interest' mark as Interested
+                String bodyText = replyNode.path("body").asText("").toLowerCase();
+                if (bodyText.contains("interested") || bodyText.contains("interest")) {
+                    item.put("lead_type", "Interested");
+                }
+
+                com.fasterxml.jackson.databind.node.ArrayNode arr = mapper.createArrayNode();
+                arr.add(item);
+                itemsNode = arr;
+            } else if (root.isArray()) {
+                itemsNode = root;
+            } else {
+                if (root.has("data")) {
+                    itemsNode = root.get("data");
+                } else if (root.has("emails")) {
+                    itemsNode = root.get("emails");
+                } else {
+                    java.util.Iterator<com.fasterxml.jackson.databind.JsonNode> it = root.elements();
+                    while (it.hasNext()) {
+                        com.fasterxml.jackson.databind.JsonNode n = it.next();
+                        if (n.isArray()) {
+                            itemsNode = n;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (itemsNode != null && itemsNode.isArray()) {
+                for (com.fasterxml.jackson.databind.JsonNode item : itemsNode) {
+                    String id = item.path("id").asText(null);
+                    if (id == null) continue;
+
+                    EmailLead lead = repository.findById(id).orElse(new EmailLead());
+                    lead.setId(id);
+
+                    String tsCreated = item.path("timestamp_created").asText(null);
+                    if (tsCreated != null && !tsCreated.isEmpty()) {
+                        try { lead.setTimestampCreated(java.time.Instant.parse(tsCreated)); } catch (Exception ex) { }
+                    }
+                    String tsEmail = item.path("timestamp_email").asText(null);
+                    if (tsEmail != null && !tsEmail.isEmpty()) {
+                        try { lead.setTimestampEmail(java.time.Instant.parse(tsEmail)); } catch (Exception ex) { }
+                    }
+
+                    // common fields
+                    if (item.has("organization_id")) lead.setOrganizationId(item.path("organization_id").asText(null));
+                    if (item.has("from_address_email")) lead.setFromAddressEmail(item.path("from_address_email").asText(null));
+                    // fallback: sometimes nested from object
+                    if ((lead.getFromAddressEmail() == null || lead.getFromAddressEmail().isBlank()) && item.has("from")) {
+                        com.fasterxml.jackson.databind.JsonNode from = item.get("from");
+                        if (from.has("email")) lead.setFromAddressEmail(from.path("email").asText(null));
+                        else if (from.has("address")) lead.setFromAddressEmail(from.path("address").asText(null));
+                    }
+
+                    if (item.has("campaign_id")) lead.setCampaignId(item.path("campaign_id").asText(null));
+                    if (item.has("lead")) lead.setLead(item.path("lead").asText(null));
+                    if (item.has("thread_id")) lead.setThreadId(item.path("thread_id").asText(null));
+                    if (item.has("lead_name")) lead.setLeadName(item.path("lead_name").asText(null));
+                    if (item.has("lead_type")) lead.setLeadType(normalizeLeadType(item.path("lead_type").asText(null)));
+
+                    repository.save(lead);
+                    processed++;
+                }
+            }
+        } catch (Exception e) {
+            System.out.println("Failed to process webhook payload: " + e.getMessage());
+        }
+        return processed;
+    }
+
+    /**
+     * Query Instantly API for emails for a specific lead email and campaign id
+     * and process the returned items to enrich/save leads.
+     */
+    public int enrichAndSaveForLeadAndCampaign(String leadEmail, String campaignId) {
+        if (leadEmail == null || leadEmail.isBlank()) return 0;
+        try {
+            String qs = "email_type=received&limit=100";
+            qs += "&lead=" + java.net.URLEncoder.encode(leadEmail, java.nio.charset.StandardCharsets.UTF_8);
+            if (campaignId != null && !campaignId.isBlank()) {
+                qs += "&campaign_id=" + java.net.URLEncoder.encode(campaignId, java.nio.charset.StandardCharsets.UTF_8);
+            }
+            java.net.URI uri = java.net.URI.create(baseUrl + "/api/v2/emails?" + qs);
+
+            java.net.http.HttpRequest req = java.net.http.HttpRequest.newBuilder(uri)
+                    .GET()
+                    .timeout(java.time.Duration.ofSeconds(20))
+                    .header("Accept", "application/json")
+                    .header("Authorization", "Bearer " + apiKey)
+                    .build();
+
+            java.net.http.HttpResponse<String> resp = httpClient.send(req, java.net.http.HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() >= 400) {
+                throw new IllegalStateException("Instantly API returned status " + resp.statusCode());
+            }
+
+            String body = resp.body();
+            return processWebhookPayload(body);
+        } catch (Exception e) {
+            System.out.println("Failed to enrich leads from Instantly API: " + e.getMessage());
+            return 0;
+        }
+    }
+
     public String getConversationByThreadId(String threadId) throws Exception {
         if (threadId == null) throw new IllegalArgumentException("threadId is required");
 
