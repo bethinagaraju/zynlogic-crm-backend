@@ -54,8 +54,10 @@ public class GetLeadsController {
                                       @RequestParam(required = false) Integer currentStage,
                                       @RequestParam(value = "due", required = false) String due,
                                       @RequestParam(value = "tags", required = false) String tags,
-                                      @RequestParam(value = "tagsMode", required = false, defaultValue = "all") String tagsMode) {
-        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(Math.max(0, page), Math.max(1, size));
+                                      @RequestParam(value = "tagsMode", required = false, defaultValue = "all") String tagsMode,
+                                      @RequestParam(value = "order", required = false, defaultValue = "desc") String order) {
+        org.springframework.data.domain.Sort.Direction dir = "asc".equalsIgnoreCase(order) ? org.springframework.data.domain.Sort.Direction.ASC : org.springframework.data.domain.Sort.Direction.DESC;
+        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(Math.max(0, page), Math.max(1, size), org.springframework.data.domain.Sort.by(dir, "timestampCreated"));
         org.springframework.data.domain.Page<EmailLead> leadsPage = memoryService.getLeads(pageable, leadType, currentStage, due, tags, tagsMode);
         return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(leadsPage);
     }

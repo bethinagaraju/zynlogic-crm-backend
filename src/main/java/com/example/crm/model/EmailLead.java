@@ -84,7 +84,7 @@ public class EmailLead {
             this.dueDate = Instant.now();
         }
         this.currentStage = 1;
-        this.leadType = "Interested";
+        this.leadType = "None";
     }
 
     // Getters and setters
