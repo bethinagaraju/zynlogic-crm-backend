@@ -283,7 +283,8 @@ public class GetLeadsController {
         java.util.Optional<EmailLead> opt = repository.findById(id);
         if (opt.isEmpty()) return ResponseEntity.status(404).body(java.util.Map.of("error", "EmailLead not found"));
         EmailLead lead = opt.get();
-        lead.setLeadType(req.getLeadType());
+        // enforce default leadType = "None" regardless of incoming value
+        lead.setLeadType("None");
         repository.save(lead);
         return ResponseEntity.ok().body(lead);
     }

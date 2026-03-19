@@ -35,9 +35,27 @@ public class WebhookController {
 
         int processed = memoryService.processWebhookPayload(body);
 
-        // Attempt enrichment: extract lead.email and campaign.id if present and query Instantly API
+        // If webhook includes an Instantly email id, fetch the full email and save it
+        int fetched = 0;
         try {
             com.fasterxml.jackson.databind.JsonNode root = new com.fasterxml.jackson.databind.ObjectMapper().readTree(body);
+            String emailId = null;
+            if (root.has("email_id")) emailId = root.path("email_id").asText(null);
+            // also support nested reply.email_id shapes
+            if ((emailId == null || emailId.isBlank()) && root.has("reply") && root.get("reply").has("email_id")) {
+                emailId = root.get("reply").path("email_id").asText(null);
+            }
+
+            if (emailId != null && !emailId.isBlank()) {
+                try {
+                    memoryService.fetchEmailByIdAndSave(emailId);
+                    fetched = 1;
+                } catch (Exception ex) {
+                    // ignore fetch errors but report fetched=0
+                    fetched = 0;
+                }
+            }
+            // Attempt enrichment by lead email as before
             String leadEmail = null;
             String campaignId = null;
             if (root.has("lead") && root.get("lead").has("email")) {
@@ -50,9 +68,9 @@ public class WebhookController {
             if (leadEmail != null && !leadEmail.isBlank()) {
                 enriched = memoryService.enrichAndSaveForLeadAndCampaign(leadEmail, campaignId);
             }
-            return ResponseEntity.ok().body(Map.of("processed", processed, "enriched", enriched));
+            return ResponseEntity.ok().body(Map.of("processed", processed, "fetched", fetched, "enriched", enriched));
         } catch (Exception ex) {
-            return ResponseEntity.ok().body(Map.of("processed", processed, "enriched", 0));
+            return ResponseEntity.ok().body(Map.of("processed", processed, "fetched", 0, "enriched", 0));
         }
     }
 }

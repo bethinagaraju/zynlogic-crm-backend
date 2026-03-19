@@ -9,11 +9,13 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.OneToOne;
+import jakarta.persistence.Transient;
+import org.springframework.data.domain.Persistable;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
 
 @Entity
 @Table(name = "email_lead")
-public class EmailLead {
+public class EmailLead implements Persistable<String> {
 
     @Id
     private String id;
@@ -68,6 +70,9 @@ public class EmailLead {
     @JsonManagedReference
     private LeadDetails details;
 
+    @Transient
+    private transient boolean _isNew = false;
+
     @Column(name = "lead_name")
     private String leadName;
 
@@ -85,6 +90,16 @@ public class EmailLead {
         }
         this.currentStage = 1;
         this.leadType = "None";
+    }
+
+    public void markNew() { this._isNew = true; }
+
+    public void markNotNew() { this._isNew = false; }
+
+    @Override
+    @Transient
+    public boolean isNew() {
+        return this._isNew;
     }
 
     // Getters and setters

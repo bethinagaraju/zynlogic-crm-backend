@@ -389,6 +389,7 @@ public class InstantlyMemoryService {
                     if (id == null) continue;
 
                     EmailLead lead = new EmailLead();
+                    lead.markNew();
                     lead.setId(id);
 
                     String tsCreated = item.path("timestamp_created").asText(null);
@@ -437,14 +438,22 @@ public class InstantlyMemoryService {
                     boolean existsByLead = (leadStr != null && !leadStr.isEmpty()) && repository.existsByLead(leadStr);
 
                     if (!existsById && !existsByLead) {
-                        repository.save(lead);
-                        // create an empty LeadDetails record linked to this EmailLead
+                        // create an empty LeadDetails record linked to this EmailLead and persist both
                         try {
                             LeadDetails details = new LeadDetails();
                             details.setEmailLead(lead);
-                            detailsRepository.save(details);
+                            lead.setDetails(details);
+                            repository.saveAndFlush(lead); // cascade will persist details immediately
                         } catch (Exception ex) {
-                            // don't fail the whole sync if details creation fails
+                            // fallback: save lead and then details separately
+                            try {
+                                repository.saveAndFlush(lead);
+                                LeadDetails details = new LeadDetails();
+                                details.setEmailLead(lead);
+                                detailsRepository.save(details);
+                            } catch (Exception ex2) {
+                                // ignore
+                            }
                         }
                         added++;
                     }
@@ -512,6 +521,63 @@ public class InstantlyMemoryService {
                 com.fasterxml.jackson.databind.node.ArrayNode arr = mapper.createArrayNode();
                 arr.add(item);
                 itemsNode = arr;
+
+            // support payloads where fields are at the root (lead_email, email, reply_text, reply_html, email_account as string, campaign_id etc.)
+            } else if (root.has("lead_email") || root.has("email") || root.has("reply_text") || root.has("reply_html")) {
+                com.fasterxml.jackson.databind.node.ObjectNode item = mapper.createObjectNode();
+                // id: prefer email_id or email_id-like fields, else leave null
+                if (root.has("email_id")) item.put("id", root.path("email_id").asText(null));
+                else if (root.has("email_id")) item.put("id", root.path("email_id").asText(null));
+
+                // lead email may be in lead_email or email or lead_email field
+                String leadEmail = null;
+                if (root.has("lead_email")) leadEmail = root.path("lead_email").asText(null);
+                if ((leadEmail == null || leadEmail.isBlank()) && root.has("email")) leadEmail = root.path("email").asText(null);
+                if ((leadEmail == null || leadEmail.isBlank()) && root.has("lead")) {
+                    com.fasterxml.jackson.databind.JsonNode leadN = root.get("lead");
+                    if (leadN.has("email")) leadEmail = leadN.path("email").asText(null);
+                }
+                if (leadEmail != null) item.put("lead", leadEmail);
+
+                // lead name
+                if (root.has("firstName") || root.has("first_name") || root.has("lastName") || root.has("last_name")) {
+                    String fn = root.path("firstName").asText(root.path("first_name").asText(""));
+                    String ln = root.path("lastName").asText(root.path("last_name").asText(""));
+                    String fullname = (fn + " " + ln).trim();
+                    if (!fullname.isEmpty()) item.put("lead_name", fullname);
+                }
+
+                // campaign id
+                if (root.has("campaign_id")) item.put("campaign_id", root.path("campaign_id").asText(null));
+                else if (root.has("campaign") && root.get("campaign").has("id")) item.put("campaign_id", root.get("campaign").path("id").asText(null));
+
+                // from address: sometimes email_account is a string
+                if (root.has("email_account") && root.get("email_account").isTextual()) {
+                    item.put("from_address_email", root.path("email_account").asText(null));
+                } else if (root.has("email_account") && root.get("email_account").has("email")) {
+                    item.put("from_address_email", root.get("email_account").path("email").asText(null));
+                }
+
+                // thread/email id
+                if (root.has("email_id")) item.put("thread_id", root.path("email_id").asText(null));
+
+                // timestamp email may be in timestamp or received_at
+                if (root.has("received_at")) item.put("timestamp_email", root.path("received_at").asText(null));
+                else if (root.has("timestamp")) item.put("timestamp_email", root.path("timestamp").asText(null));
+
+                // reply body from reply_text or reply_html
+                String replyBody = null;
+                if (root.has("reply_text")) replyBody = root.path("reply_text").asText(null);
+                if ((replyBody == null || replyBody.isBlank()) && root.has("reply_html")) replyBody = root.path("reply_html").asText(null);
+                if (replyBody != null) item.put("body", replyBody);
+
+                // simple heuristic: mark Interested if body contains keywords
+                String rt = replyBody == null ? "" : replyBody.toLowerCase();
+                if (rt.contains("interested") || rt.contains("interest")) item.put("lead_type", "Interested");
+
+                com.fasterxml.jackson.databind.node.ArrayNode arr = mapper.createArrayNode();
+                arr.add(item);
+                itemsNode = arr;
             } else if (root.isArray()) {
                 itemsNode = root;
             } else {
@@ -536,7 +602,7 @@ public class InstantlyMemoryService {
                     String id = item.path("id").asText(null);
                     if (id == null) continue;
 
-                    EmailLead lead = repository.findById(id).orElse(new EmailLead());
+                    EmailLead lead = repository.findById(id).orElseGet(() -> { EmailLead l = new EmailLead(); l.markNew(); return l; });
                     lead.setId(id);
 
                     String tsCreated = item.path("timestamp_created").asText(null);
@@ -562,9 +628,23 @@ public class InstantlyMemoryService {
                     if (item.has("lead")) lead.setLead(item.path("lead").asText(null));
                     if (item.has("thread_id")) lead.setThreadId(item.path("thread_id").asText(null));
                     if (item.has("lead_name")) lead.setLeadName(item.path("lead_name").asText(null));
-                    if (item.has("lead_type")) lead.setLeadType(normalizeLeadType(item.path("lead_type").asText(null)));
+                    // enforce default leadType = "None"
+                    lead.setLeadType("None");
 
-                    repository.save(lead);
+                    // persist lead
+                    repository.saveAndFlush(lead);
+                    // ensure LeadDetails exists for this EmailLead (create if missing) and link to lead in DB
+                    try {
+                        java.util.Optional<LeadDetails> existing = detailsRepository.findByEmailLead_Id(lead.getId());
+                        if (existing.isEmpty()) {
+                            LeadDetails details = new LeadDetails();
+                            details.setEmailLead(lead);
+                            lead.setDetails(details);
+                            repository.saveAndFlush(lead); // cascade/save link immediately
+                        }
+                    } catch (Exception ex) {
+                        // ignore errors creating details
+                    }
                     processed++;
                 }
             }
@@ -679,5 +759,95 @@ public class InstantlyMemoryService {
         com.fasterxml.jackson.databind.node.ObjectNode out = mapper.createObjectNode();
         out.set("data", combined);
         return mapper.writeValueAsString(out);
+    }
+
+    /**
+     * Fetch a single email by its Instantly email id and save/update the EmailLead record.
+     */
+    public EmailLead fetchEmailByIdAndSave(String emailId) throws Exception {
+        if (emailId == null || emailId.isBlank()) throw new IllegalArgumentException("emailId is required");
+
+        java.net.URI uri = java.net.URI.create(baseUrl + "/api/v2/emails/" + java.net.URLEncoder.encode(emailId, java.nio.charset.StandardCharsets.UTF_8));
+
+        java.net.http.HttpRequest req = java.net.http.HttpRequest.newBuilder(uri)
+                .GET()
+                .timeout(java.time.Duration.ofSeconds(20))
+                .header("Accept", "application/json")
+                .header("Authorization", "Bearer " + apiKey)
+                .build();
+
+        java.net.http.HttpResponse<String> resp = httpClient.send(req, java.net.http.HttpResponse.BodyHandlers.ofString());
+        if (resp.statusCode() >= 400) {
+            throw new IllegalStateException("Instantly API returned status " + resp.statusCode() + ": " + resp.body());
+        }
+
+        JsonNode root = mapper.readTree(resp.body());
+
+        JsonNode item = root;
+        if (root.has("data")) {
+            JsonNode d = root.get("data");
+            if (d.isArray() && d.size() > 0) item = d.get(0);
+            else if (d.isObject()) item = d;
+        }
+
+        String id = item.path("id").asText(null);
+        if (id == null || id.isEmpty()) id = emailId;
+
+        EmailLead lead = repository.findById(id).orElseGet(() -> { EmailLead l = new EmailLead(); l.markNew(); return l; });
+        lead.setId(id);
+
+        String tsCreated = item.path("timestamp_created").asText(null);
+        if (tsCreated != null && !tsCreated.isEmpty()) {
+            try { lead.setTimestampCreated(java.time.Instant.parse(tsCreated)); } catch (Exception ex) { }
+        }
+        String tsEmail = item.path("timestamp_email").asText(null);
+        if (tsEmail != null && !tsEmail.isEmpty()) {
+            try { lead.setTimestampEmail(java.time.Instant.parse(tsEmail)); } catch (Exception ex) { }
+        }
+
+        if (item.has("organization_id")) lead.setOrganizationId(item.path("organization_id").asText(null));
+        if (item.has("eaccount")) lead.setEaccount(item.path("eaccount").asText(null));
+        if (item.has("from_address_email")) lead.setFromAddressEmail(item.path("from_address_email").asText(null));
+        if ((lead.getFromAddressEmail() == null || lead.getFromAddressEmail().isBlank()) && item.has("from")) {
+            JsonNode from = item.get("from");
+            if (from.has("email")) lead.setFromAddressEmail(from.path("email").asText(null));
+            else if (from.has("address")) lead.setFromAddressEmail(from.path("address").asText(null));
+        }
+
+        if (item.has("campaign_id")) lead.setCampaignId(item.path("campaign_id").asText(null));
+        if (item.has("lead")) lead.setLead(item.path("lead").asText(null));
+        if (item.has("thread_id")) lead.setThreadId(item.path("thread_id").asText(null));
+        if (item.has("lead_name")) lead.setLeadName(item.path("lead_name").asText(null));
+        // enforce default leadType = "None"
+        lead.setLeadType("None");
+
+        if (item.has("ue_type") && item.get("ue_type").canConvertToInt()) lead.setUeType(item.path("ue_type").asInt());
+        if (item.has("is_unread") && item.get("is_unread").canConvertToInt()) lead.setIsUnread(item.path("is_unread").asInt());
+        if (item.has("ai_interest_value") && item.get("ai_interest_value").canConvertToInt()) lead.setAiInterestValue(item.path("ai_interest_value").asInt());
+        if (item.has("is_focused") && item.get("is_focused").canConvertToInt()) lead.setIsFocused(item.path("is_focused").asInt());
+        if (item.has("i_status") && item.get("i_status").canConvertToInt()) lead.setIStatus(item.path("i_status").asInt());
+
+        if (lead.getDueDate() == null) {
+            try { lead.setDueDate(java.time.Instant.now().plus(1, java.time.temporal.ChronoUnit.DAYS)); } catch (Exception ex) { lead.setDueDate(java.time.Instant.now()); }
+        }
+        if (lead.getCurrentStage() == null) lead.setCurrentStage(1);
+
+
+        repository.saveAndFlush(lead);
+
+        // ensure LeadDetails exists for this EmailLead and link in memory/DB
+        try {
+            java.util.Optional<LeadDetails> existing = detailsRepository.findByEmailLead_Id(lead.getId());
+            if (existing.isEmpty()) {
+                LeadDetails details = new LeadDetails();
+                details.setEmailLead(lead);
+                lead.setDetails(details);
+                repository.saveAndFlush(lead); // persist link via cascade immediately
+            }
+        } catch (Exception ex) {
+            // don't fail on details creation
+        }
+
+        return lead;
     }
 }
