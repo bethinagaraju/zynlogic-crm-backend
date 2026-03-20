@@ -22,9 +22,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Service
 public class InstantlyMemoryService {
+
+    private static final Logger logger = LoggerFactory.getLogger(InstantlyMemoryService.class);
 
     private final String apiKey;
     private final String baseUrl;
@@ -488,6 +492,7 @@ public class InstantlyMemoryService {
         int processed = 0;
         try {
             com.fasterxml.jackson.databind.JsonNode root = mapper.readTree(body);
+            logger.debug("processWebhookPayload body length={}", body == null ? 0 : body.length());
 
             // Support common webhook shapes. First, handle single-object webhook with `lead` + `reply`.
             com.fasterxml.jackson.databind.JsonNode itemsNode = null;
@@ -600,21 +605,88 @@ public class InstantlyMemoryService {
             if (itemsNode != null && itemsNode.isArray()) {
                 for (com.fasterxml.jackson.databind.JsonNode item : itemsNode) {
                     String id = item.path("id").asText(null);
-                    if (id == null) continue;
 
-                    EmailLead lead = repository.findById(id).orElseGet(() -> { EmailLead l = new EmailLead(); l.markNew(); return l; });
-                    lead.setId(id);
+                    EmailLead lead = null;
 
+                    if (id == null || id.isBlank()) {
+                        String leadEmail = item.path("lead").asText(null);
+                        String threadId = item.path("thread_id").asText(null);
+                        java.util.Optional<EmailLead> found = java.util.Optional.empty();
+                        if (leadEmail != null && !leadEmail.isBlank()) {
+                            try { found = repository.findByLead(leadEmail); } catch (Exception ex) { found = java.util.Optional.empty(); }
+                        }
+                        if (found.isEmpty() && threadId != null && !threadId.isBlank()) {
+                            try { found = repository.findByThreadId(threadId); } catch (Exception ex) { found = java.util.Optional.empty(); }
+                        }
+                        if (found.isPresent()) {
+                            lead = found.get();
+                        } else {
+                            // no id and no existing match -> skip (cannot create without stable id)
+                            logger.debug("Skipping webhook item without id and no matching existing lead (leadEmail={} threadId={})", leadEmail, threadId);
+                            continue;
+                        }
+                    } else {
+                        java.util.Optional<EmailLead> byId = repository.findById(id);
+                        if (byId.isPresent()) {
+                            lead = byId.get();
+                        } else {
+                            // try to find existing record by lead email or thread id to avoid duplicates
+                            String leadEmail = item.path("lead").asText(null);
+                            String threadId = item.path("thread_id").asText(null);
+                            java.util.Optional<EmailLead> found = java.util.Optional.empty();
+                            if (leadEmail != null && !leadEmail.isBlank()) {
+                                try { found = repository.findByLead(leadEmail); } catch (Exception ex) { found = java.util.Optional.empty(); }
+                            }
+                            if (found.isEmpty() && threadId != null && !threadId.isBlank()) {
+                                try { found = repository.findByThreadId(threadId); } catch (Exception ex) { found = java.util.Optional.empty(); }
+                            }
+                            if (found.isPresent()) {
+                                lead = found.get();
+                                logger.info("Found existing lead by lead/email or thread. Using existing id={} instead of incoming id={}", lead.getId(), id);
+                            } else {
+                                lead = new EmailLead();
+                                lead.markNew();
+                                lead.setId(id);
+                            }
+                        }
+                    }
+
+                    java.time.Instant beforeTs = lead.getTimestampEmail();
                     String tsCreated = item.path("timestamp_created").asText(null);
+                    String tsEmail = item.path("timestamp_email").asText(null);
+
+                    // If this lead already exists in DB, only update timestamp_email (do not overwrite other fields)
+                    if (!lead.isNew()) {
+                        if (tsEmail != null && !tsEmail.isEmpty()) {
+                            try {
+                                java.time.Instant parsed = java.time.Instant.parse(tsEmail);
+                                lead.setTimestampEmail(parsed);
+                                if (beforeTs == null || !beforeTs.equals(parsed)) {
+                                    logger.info("Updated timestamp_email for existing lead id={} lead={} threadId={} from {} to {}", lead.getId(), lead.getLead(), lead.getThreadId(), beforeTs, parsed);
+                                } else {
+                                    logger.debug("timestamp_email unchanged for existing lead id={}", lead.getId());
+                                }
+                            } catch (Exception ex) {
+                                logger.debug("Failed to parse timestamp_email='{}' for lead id={}", tsEmail, lead.getId());
+                            }
+                            repository.saveAndFlush(lead);
+                            processed++;
+                        } else {
+                            logger.debug("No timestamp_email provided for existing lead id={}; skipping update", lead.getId());
+                        }
+                        // do not modify other fields for existing leads
+                        continue;
+                    }
+
+                    // New lead flow: set provided fields and persist as before
                     if (tsCreated != null && !tsCreated.isEmpty()) {
                         try { lead.setTimestampCreated(java.time.Instant.parse(tsCreated)); } catch (Exception ex) { }
                     }
-                    String tsEmail = item.path("timestamp_email").asText(null);
                     if (tsEmail != null && !tsEmail.isEmpty()) {
                         try { lead.setTimestampEmail(java.time.Instant.parse(tsEmail)); } catch (Exception ex) { }
                     }
 
-                    // common fields
+                    // common fields for new leads
                     if (item.has("organization_id")) lead.setOrganizationId(item.path("organization_id").asText(null));
                     if (item.has("from_address_email")) lead.setFromAddressEmail(item.path("from_address_email").asText(null));
                     // fallback: sometimes nested from object
@@ -631,7 +703,7 @@ public class InstantlyMemoryService {
                     // enforce default leadType = "None"
                     lead.setLeadType("None");
 
-                    // persist lead
+                    // persist new lead
                     repository.saveAndFlush(lead);
                     // ensure LeadDetails exists for this EmailLead (create if missing) and link to lead in DB
                     try {
@@ -649,7 +721,7 @@ public class InstantlyMemoryService {
                 }
             }
         } catch (Exception e) {
-            System.out.println("Failed to process webhook payload: " + e.getMessage());
+            logger.error("Failed to process webhook payload: {}", e.getMessage(), e);
         }
         return processed;
     }

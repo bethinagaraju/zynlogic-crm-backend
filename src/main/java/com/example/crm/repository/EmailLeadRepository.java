@@ -12,6 +12,10 @@ public interface EmailLeadRepository extends JpaRepository<EmailLead, String>, J
 
 	boolean existsByLead(String lead);
 
+	java.util.Optional<EmailLead> findByLead(String lead);
+
+	java.util.Optional<EmailLead> findByThreadId(String threadId);
+
 	@Override
 	@EntityGraph(attributePaths = {"details"})
 	List<EmailLead> findAll();

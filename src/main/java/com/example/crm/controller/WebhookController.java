@@ -1,6 +1,8 @@
 package com.example.crm.controller;
 
 import com.example.crm.service.InstantlyMemoryService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.MediaType;
@@ -16,6 +18,8 @@ import java.util.Map;
 @RequestMapping("/api/webhook")
 public class WebhookController {
 
+    private static final Logger logger = LoggerFactory.getLogger(WebhookController.class);
+
     private final InstantlyMemoryService memoryService;
 
     @Value("${instantly.webhook.id:019d0057-7243-7c8a-8bf3-cf4c688630ed}")
@@ -28,6 +32,7 @@ public class WebhookController {
     @PostMapping(value = "/instantly", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<?> handleInstantlyWebhook(@RequestHeader(value = "X-Webhook-Id", required = false) String headerId,
                                                     @RequestBody String body) {
+        logger.debug("Received webhook (headerId={}): {}", headerId, (body != null && body.length() > 2000) ? body.substring(0,2000) + "..." : body);
         // Basic validation: if a webhook id header is present, require it to match configured value
         if (headerId != null && !headerId.isBlank() && !headerId.equals(expectedWebhookId)) {
             return ResponseEntity.status(403).body(Map.of("error", "webhook id mismatch"));
@@ -68,8 +73,10 @@ public class WebhookController {
             if (leadEmail != null && !leadEmail.isBlank()) {
                 enriched = memoryService.enrichAndSaveForLeadAndCampaign(leadEmail, campaignId);
             }
+            logger.info("Webhook handled: processed={}, fetched={}, enriched={}", processed, fetched, enriched);
             return ResponseEntity.ok().body(Map.of("processed", processed, "fetched", fetched, "enriched", enriched));
         } catch (Exception ex) {
+            logger.error("Error handling webhook: {}", ex.getMessage(), ex);
             return ResponseEntity.ok().body(Map.of("processed", processed, "fetched", 0, "enriched", 0));
         }
     }
